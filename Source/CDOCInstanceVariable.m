@@ -56,11 +56,11 @@
 - (CDType *)type;
 {
     if (self.hasParsedType == NO && self.parseError == nil) {
-        CDTypeParser *parser = [[CDTypeParser alloc] initWithString:self.typeString];
+        NSString *typeStr = self.typeString.length > 0 ? self.typeString : @"?";
+        CDTypeParser *parser = [[CDTypeParser alloc] initWithString:typeStr];
         NSError *error;
         _type = [parser parseType:&error];
         if (_type == nil) {
-            NSLog(@"Warning: Parsing instance variable type failed, %@", self.name);
             _parseError = error;
         } else {
             self.hasParsedType = YES;

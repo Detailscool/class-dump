@@ -109,8 +109,6 @@ static BOOL debug = NO;
 
     NSError *error = nil;
     NSArray *methodTypes = [parser parseMethodType:&error];
-    if (methodTypes == nil)
-        NSLog(@"Warning: Parsing method types failed, %@", name);
 
     if (methodTypes == nil || [methodTypes count] == 0) {
         return nil;
@@ -185,8 +183,6 @@ static BOOL debug = NO;
 
     NSError *error = nil;
     NSArray *methodTypes = [parser parseMethodType:&error];
-    if (methodTypes == nil)
-        NSLog(@"Warning: Parsing method types failed, %@", methodName);
 
     if (methodTypes == nil || [methodTypes count] == 0) {
         return nil;

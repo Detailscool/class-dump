@@ -43,10 +43,12 @@ static NSString *CDTokenDescription(int token)
 - (id)initWithString:(NSString *)string;
 {
     if ((self = [super init])) {
+        if (string.length == 0)
+            return self;
         // Do some preprocessing first: Replace "<unnamed>::" with just "unnamed::".
         NSMutableString *str = [string mutableCopy];
         [str replaceOccurrencesOfString:@"<unnamed>::" withString:@"unnamed::" options:(NSStringCompareOptions)0 range:NSMakeRange(0, [string length])];
-        
+
         _lexer = [[CDTypeLexer alloc] initWithString:str];
         _lookahead = 0;
     }
