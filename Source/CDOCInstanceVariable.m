@@ -61,6 +61,8 @@
         NSError *error;
         _type = [parser parseType:&error];
         if (_type == nil) {
+//            NSLog(@"Warning: Parsing instance variable type failed, %@, typeString: '%@', error: %@",
+//                  self.name, typeStr, [error userInfo][@"CDErrorKey_LocalizedLongDescription"]);
             _parseError = error;
         } else {
             self.hasParsedType = YES;

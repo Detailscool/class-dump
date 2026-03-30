@@ -105,10 +105,14 @@ static BOOL debug = NO;
 
 - (NSDictionary *)formattedTypesForMethodName:(NSString *)name type:(NSString *)type;
 {
+    if (type.length == 0) return nil;
     CDTypeParser *parser = [[CDTypeParser alloc] initWithString:type];
 
     NSError *error = nil;
     NSArray *methodTypes = [parser parseMethodType:&error];
+    if (methodTypes == nil) {
+        NSLog(@"Warning: Parsing method types failed, method: %@, typeString: '%@', error: %@", name, type, [error userInfo][CDErrorKey_LocalizedLongDescription]);
+    }
 
     if (methodTypes == nil || [methodTypes count] == 0) {
         return nil;
@@ -179,10 +183,14 @@ static BOOL debug = NO;
 
 - (NSString *)formatMethodName:(NSString *)methodName typeString:(NSString *)typeString;
 {
+    if (typeString.length == 0) return nil;
     CDTypeParser *parser = [[CDTypeParser alloc] initWithString:typeString];
 
     NSError *error = nil;
     NSArray *methodTypes = [parser parseMethodType:&error];
+    if (methodTypes == nil) {
+        NSLog(@"Warning: Parsing method types failed, method: %@, typeString: '%@', error: %@", methodName, typeString, [error userInfo][CDErrorKey_LocalizedLongDescription]);
+    }
 
     if (methodTypes == nil || [methodTypes count] == 0) {
         return nil;

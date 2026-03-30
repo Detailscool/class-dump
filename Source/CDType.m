@@ -611,9 +611,10 @@ static BOOL debugMerge = NO;
         case 'O':
         case 'R':
         case 'V':
+        case 'A': // _Atomic
             result = [NSString stringWithFormat:@"%c%@", _primitiveType, [_subtype _typeStringWithVariableNamesToLevel:level showObjectTypes:shouldShowObjectTypes]];
             break;
-            
+
         case T_FUNCTION_POINTER_TYPE:
             result = @"^?";
             break;
