@@ -43,10 +43,12 @@ static NSString *CDTokenDescription(int token)
 - (id)initWithString:(NSString *)string;
 {
     if ((self = [super init])) {
+        if (string.length == 0)
+            return self;
         // Do some preprocessing first: Replace "<unnamed>::" with just "unnamed::".
         NSMutableString *str = [string mutableCopy];
         [str replaceOccurrencesOfString:@"<unnamed>::" withString:@"unnamed::" options:(NSStringCompareOptions)0 range:NSMakeRange(0, [string length])];
-        
+
         _lexer = [[CDTypeLexer alloc] initWithString:str];
         _lookahead = 0;
     }
@@ -58,6 +60,7 @@ static NSString *CDTokenDescription(int token)
 
 - (NSArray *)parseMethodType:(NSError *__autoreleasing *)error;
 {
+    if (_lexer == nil) return nil;
     NSArray *result;
 
     @try {
@@ -94,6 +97,7 @@ static NSString *CDTokenDescription(int token)
 
 - (CDType *)parseType:(NSError *__autoreleasing *)error;
 {
+    if (_lexer == nil) return nil;
     CDType *result;
 
     @try {
@@ -204,7 +208,8 @@ static NSString *CDTokenDescription(int token)
         || _lookahead == 'o'
         || _lookahead == 'O'
         || _lookahead == 'R'
-        || _lookahead == 'V') { // modifiers
+        || _lookahead == 'V'
+        || _lookahead == 'A') { // modifiers (A = _Atomic)
         int modifier = _lookahead;
         [self match:modifier];
 
@@ -460,7 +465,8 @@ static NSString *CDTokenDescription(int token)
         || token == 'o'
         || token == 'O'
         || token == 'R'
-        || token == 'V')
+        || token == 'V'
+        || token == 'A') // _Atomic
         return YES;
 
     return NO;
@@ -517,6 +523,8 @@ static NSString *CDTokenDescription(int token)
         || token == 'O'
         || token == 'R'
         || token == 'V'
+        || token == 'j'  // complex
+        || token == 'A'  // _Atomic
         || token == '^'
         || token == 'b'
         || token == '@'

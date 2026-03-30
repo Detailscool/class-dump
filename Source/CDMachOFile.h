@@ -58,6 +58,18 @@ typedef enum : NSUInteger {
 
 - (NSUInteger)dataOffsetForAddress:(NSUInteger)address;
 
+// Reverse of dataOffsetForAddress: – maps a file offset back to a VM address.
+// Returns 0 if no segment covers the given offset.
+- (NSUInteger)fileOffsetToAddress:(NSUInteger)fileOffset;
+
+// Reads one pointer-sized value at a VM address, respecting byte order.
+// Returns 0 (does NOT exit) if the address cannot be resolved.
+- (NSUInteger)ptrValueAtAddress:(NSUInteger)vmAddress;
+
+// Decodes a chained-fixup encoded pointer (DYLD_CHAINED_PTR_64_OFFSET, Xcode 13+).
+// Returns the decoded VM address, or 0 for external-symbol references / unresolvable values.
+- (NSUInteger)decodeChainedFixupAddress:(NSUInteger)rawValue;
+
 - (const void *)bytes;
 - (const void *)bytesAtOffset:(NSUInteger)offset;
 

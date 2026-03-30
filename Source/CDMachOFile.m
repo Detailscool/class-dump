@@ -319,6 +319,91 @@ static NSString *CDMachOFileMagicNumberDescription(uint32_t magic)
     NSLog(@"Warning: %@", warning);
 }
 
+// Decode a chained fixup pointer used with LC_DYLD_CHAINED_FIXUPS on modern arm64 binaries.
+//
+// Two formats are in use:
+//   DYLD_CHAINED_PTR_64        (format 6): target = bits[35:0] = absolute VM address
+//   DYLD_CHAINED_PTR_64_OFFSET (format 6 in newer toolchain): target = bits[31:0] = runtime offset from preferred load address
+//
+// In practice we try the 36-bit absolute interpretation first (if the result lands in a known
+// segment we accept it), then fall back to the 32-bit offset interpretation.
+//
+// bit [63] = bind (1 = external symbol, cannot resolve locally)
+- (NSUInteger)decodeChainedFixupAddress:(NSUInteger)rawValue;
+{
+    // bind bit set → external symbol; cannot resolve to a local address
+    if (rawValue >> 63)
+        return 0;
+
+    uint64_t high8 = (rawValue >> 32) & 0xFF;
+
+    // --- Try DYLD_CHAINED_PTR_64 (format 6): target is bits[35:0], absolute VM address ---
+    uint64_t target36 = rawValue & 0xFFFFFFFFFULL;  // 36-bit target
+    NSUInteger decoded36 = (NSUInteger)(target36 | (high8 << 56));
+    // Only accept if the segment has actual file content (skip __PAGEZERO which has filesize=0)
+    CDLCSegment *seg36 = [self segmentContainingAddress:decoded36];
+    if (seg36 != nil && seg36.filesize > 0)
+        return decoded36;
+
+    // --- Try DYLD_CHAINED_PTR_64_OFFSET: target is bits[31:0], offset from preferred load addr ---
+    uint64_t runtimeOffset = rawValue & 0xFFFFFFFF;
+    NSUInteger preferredLoadAddress = 0;
+    for (CDLCSegment *seg in _segments) {
+        if (seg.vmaddr != 0) {
+            preferredLoadAddress = seg.vmaddr;
+            break;
+        }
+    }
+    if (preferredLoadAddress != 0) {
+        NSUInteger decoded32 = (NSUInteger)(preferredLoadAddress + runtimeOffset + (high8 << 56));
+        if ([self segmentContainingAddress:decoded32] != nil)
+            return decoded32;
+    }
+
+    return 0;
+}
+
+// Converts a file offset within machOFile.data back to the VM address that maps to it.
+// Scans segments; returns 0 if no segment covers the given file offset.
+- (NSUInteger)fileOffsetToAddress:(NSUInteger)fileOffset;
+{
+    for (CDLCSegment *seg in _segments) {
+        if (seg.filesize == 0) continue;
+        if (fileOffset >= seg.fileoff && fileOffset < seg.fileoff + seg.filesize)
+            return (NSUInteger)(seg.vmaddr + (fileOffset - seg.fileoff));
+    }
+    return 0;
+}
+
+// Reads one pointer-sized integer (respecting byte order and ptrSize) from a VM address.
+// Returns 0 if the address cannot be resolved, without calling exit().
+- (NSUInteger)ptrValueAtAddress:(NSUInteger)vmAddress;
+{
+    if (vmAddress == 0) return 0;
+
+    // Locate the segment without going through dataOffsetForAddress: (which can exit).
+    CDLCSegment *seg = [self segmentContainingAddress:vmAddress];
+    if (seg == nil) return 0;
+
+    // Direct file-offset arithmetic — no section-level lookup needed.
+    NSUInteger fileOff = seg.fileoff + (vmAddress - seg.vmaddr);
+    const uint8_t *base = (const uint8_t *)[self.data bytes];
+
+    if (self.ptrSize == 8) {
+        uint64_t v;
+        memcpy(&v, base + fileOff, sizeof(v));
+        return (NSUInteger)(_byteOrder == CDByteOrder_LittleEndian
+                            ? OSReadLittleInt64(&v, 0)
+                            : OSReadBigInt64(&v, 0));
+    } else {
+        uint32_t v;
+        memcpy(&v, base + fileOff, sizeof(v));
+        return (NSUInteger)(_byteOrder == CDByteOrder_LittleEndian
+                            ? OSReadLittleInt32(&v, 0)
+                            : OSReadBigInt32(&v, 0));
+    }
+}
+
 - (NSString *)stringAtAddress:(NSUInteger)address;
 {
     const void *ptr;
@@ -327,6 +412,15 @@ static NSString *CDMachOFileMagicNumberDescription(uint32_t magic)
         return nil;
 
     CDLCSegment *segment = [self segmentContainingAddress:address];
+    if (segment == nil) {
+        // Modern binaries (Xcode 13+, LC_DYLD_CHAINED_FIXUPS) store encoded chained-fixup
+        // values in __DATA pointer slots instead of raw VM addresses.  Try to decode first.
+        NSUInteger decoded = [self decodeChainedFixupAddress:address];
+        if (decoded != 0)
+            segment = [self segmentContainingAddress:decoded];
+        if (segment != nil)
+            address = decoded;
+    }
     if (segment == nil) {
         NSLog(@"Error: Cannot find offset for address 0x%08lx in stringAtAddress:", address);
         exit(5);
@@ -359,13 +453,20 @@ static NSString *CDMachOFileMagicNumberDescription(uint32_t magic)
 
     CDLCSegment *segment = [self segmentContainingAddress:address];
     if (segment == nil) {
-        NSLog(@"Error: Cannot find offset for address 0x%08lx in dataOffsetForAddress:", address);
-        exit(5);
+        // Modern binaries (Xcode 13+, LC_DYLD_CHAINED_FIXUPS) store encoded chained-fixup
+        // values in __DATA pointer slots instead of raw VM addresses.  Try to decode first.
+        NSUInteger decoded = [self decodeChainedFixupAddress:address];
+        if (decoded != 0)
+            segment = [self segmentContainingAddress:decoded];
+        if (segment != nil)
+            address = decoded;
+    }
+    if (segment == nil) {
+        return 0;
     }
 
     if ([segment isProtected]) {
-        NSLog(@"Error: Segment is protected.");
-        exit(5);
+        return 0;
     }
 
 #if 0

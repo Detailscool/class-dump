@@ -186,7 +186,14 @@ NSString *CDSegmentEncryptionTypeName(CDSegmentEncryptionType type)
 
 - (NSUInteger)fileOffsetForAddress:(NSUInteger)address;
 {
-    return [[self sectionContainingAddress:address] fileOffsetForAddress:address];
+    CDSection *section = [self sectionContainingAddress:address];
+    if (section)
+        return [section fileOffsetForAddress:address];
+    // Fallback: direct calculation from segment base (needed when address
+    // falls between sections, e.g. chained-fixup decoded pointers).
+    if ([self containsAddress:address])
+        return self.fileoff + (address - self.vmaddr);
+    return 0;
 }
 
 - (NSUInteger)segmentOffsetForAddress:(NSUInteger)address;

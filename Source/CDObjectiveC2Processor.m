@@ -72,8 +72,8 @@
         [self.protocolUniquer setProtocol:protocol withAddress:address];
         
         CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-        NSParameterAssert([cursor offset] != 0);
-        
+        if ([cursor offset] == 0) return protocol;
+
         struct cd_objc2_protocol objc2Protocol;
         objc2Protocol.isa                     = [cursor readPtr];
         objc2Protocol.name                    = [cursor readPtr];
@@ -93,7 +93,8 @@
             objc2Protocol.extendedMethodTypes = [cursor readPtr];
             if (objc2Protocol.extendedMethodTypes != 0) {
                 extendedMethodTypesCursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:objc2Protocol.extendedMethodTypes];
-                NSParameterAssert([extendedMethodTypesCursor offset] != 0);
+                if ([extendedMethodTypesCursor offset] == 0)
+                    extendedMethodTypesCursor = nil;
             }
         }
         
@@ -144,8 +145,8 @@
         return nil;
     
     CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-    NSParameterAssert([cursor offset] != 0);
-    
+    if ([cursor offset] == 0) return nil;
+
     struct cd_objc2_category objc2Category;
     objc2Category.name               = [cursor readPtr];
     objc2Category.class              = [cursor readPtr];
@@ -214,8 +215,8 @@
     //NSLog(@"%s, address=%016lx", __cmd, address);
     
     CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-    NSParameterAssert([cursor offset] != 0);
-    
+    if ([cursor offset] == 0) return nil;
+
     struct cd_objc2_class objc2Class;
     objc2Class.isa        = [cursor readPtr];
     objc2Class.superclass = [cursor readPtr];
@@ -323,7 +324,7 @@
         struct cd_objc2_list_header listHeader;
         
         CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-        NSParameterAssert([cursor offset] != 0);
+        if ([cursor offset] == 0) return properties;
         //NSLog(@"property list data offset: %lu", [cursor offset]);
         
         listHeader.entsize = [cursor readInt32];
@@ -353,8 +354,8 @@
         return nil;
     
     CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-    NSParameterAssert([cursor offset] != 0);
-    
+    if ([cursor offset] == 0) return nil;
+
     struct cd_objc2_class objc2Class;
     objc2Class.isa        = [cursor readPtr];
     objc2Class.superclass = [cursor readPtr];
@@ -401,36 +402,79 @@
     
     if (address != 0) {
         CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-        NSParameterAssert([cursor offset] != 0);
+        if ([cursor offset] == 0) return methods;
         //NSLog(@"method list data offset: %lu", [cursor offset]);
         
         struct cd_objc2_list_header listHeader;
-        
-        // See getEntsize() from http://www.opensource.apple.com/source/objc4/objc4-532.2/runtime/objc-runtime-new.h
-        listHeader.entsize = [cursor readInt32] & ~(uint32_t)3;
+
+        // See getEntsize() from objc-runtime-new.h – mask matches objc4 source
+        uint32_t rawFlags  = [cursor readInt32];
+        // Bit 31: relative method selectors (iOS 14+ / Xcode 13+ small method lists)
+        BOOL isRelative    = (rawFlags & 0x80000000) != 0;
+        listHeader.entsize = rawFlags & ~(uint32_t)0xffff0003;
         listHeader.count   = [cursor readInt32];
-        NSParameterAssert(listHeader.entsize == 3 * [self.machOFile ptrSize]);
-        
-        for (uint32_t index = 0; index < listHeader.count; index++) {
-            struct cd_objc2_method objc2Method;
-            
-            objc2Method.name  = [cursor readPtr];
-            objc2Method.types = [cursor readPtr];
-            objc2Method.imp   = [cursor readPtr];
-            NSString *name    = [self.machOFile stringAtAddress:objc2Method.name];
-            NSString *types   = [self.machOFile stringAtAddress:objc2Method.types];
-            
-            if (extendedMethodTypesCursor) {
-                uint64_t extendedMethodTypes = [extendedMethodTypesCursor readPtr];
-                types = [self.machOFile stringAtAddress:extendedMethodTypes];
+
+        if (isRelative) {
+            // Relative method list: each entry is 3 × int32_t (12 bytes)
+            //   nameOffset  – relative to its own field address, points to a SEL ref pointer
+            //   typesOffset – relative to its own field address, points to type string
+            //   impOffset   – relative to its own field address, is the IMP
+            for (uint32_t index = 0; index < listHeader.count; index++) {
+                NSUInteger nameFieldAddr  = [self.machOFile fileOffsetToAddress:cursor.offset];
+                int32_t nameRelOffset     = (int32_t)[cursor readInt32];
+                NSUInteger typesFieldAddr = [self.machOFile fileOffsetToAddress:cursor.offset];
+                int32_t typesRelOffset    = (int32_t)[cursor readInt32];
+                NSUInteger impFieldAddr   = [self.machOFile fileOffsetToAddress:cursor.offset];
+                int32_t impRelOffset      = (int32_t)[cursor readInt32];
+
+                // Name: nameField + nameRelOffset → SEL-ref slot in __objc_selrefs
+                //       *selRefSlot → VM address of selector C string
+                //       (may be a chained-fixup encoded value; stringAtAddress: decodes it)
+                NSUInteger nameRefAddr = nameFieldAddr + nameRelOffset;
+                NSUInteger nameStrAddr = [self.machOFile ptrValueAtAddress:nameRefAddr];
+                // If ptrValueAtAddress returned 0 the SEL-ref slot is unresolvable; skip.
+                if (nameStrAddr == 0) continue;
+                NSString *name = [self.machOFile stringAtAddress:nameStrAddr];
+                if (name == nil) continue;
+
+                // Types: typesField + typesRelOffset → type-encoding C string directly
+                // typesRelOffset == 0 means nullable null (type info was stripped)
+                NSString *types = nil;
+                if (typesRelOffset != 0) {
+                    NSUInteger typesAddr = typesFieldAddr + typesRelOffset;
+                    types = [self.machOFile stringAtAddress:typesAddr];
+                }
+
+                if (extendedMethodTypesCursor) {
+                    uint64_t extendedMethodTypes = [extendedMethodTypesCursor readPtr];
+                    types = [self.machOFile stringAtAddress:extendedMethodTypes];
+                }
+
+                NSUInteger impAddr = impFieldAddr + impRelOffset;
+                CDOCMethod *method = [[CDOCMethod alloc] initWithName:name typeString:types address:impAddr];
+                [methods addObject:method];
             }
-            
-            //NSLog(@"%3u: %016lx %016lx %016lx", index, objc2Method.name, objc2Method.types, objc2Method.imp);
-            //NSLog(@"name: %@", name);
-            //NSLog(@"types: %@", types);
-            
-            CDOCMethod *method = [[CDOCMethod alloc] initWithName:name typeString:types address:objc2Method.imp];
-            [methods addObject:method];
+        } else {
+            // Classic absolute method list: each entry is 3 × pointer
+            NSParameterAssert(listHeader.entsize == 3 * [self.machOFile ptrSize]);
+
+            for (uint32_t index = 0; index < listHeader.count; index++) {
+                struct cd_objc2_method objc2Method;
+
+                objc2Method.name  = [cursor readPtr];
+                objc2Method.types = [cursor readPtr];
+                objc2Method.imp   = [cursor readPtr];
+                NSString *name    = [self.machOFile stringAtAddress:objc2Method.name];
+                NSString *types   = [self.machOFile stringAtAddress:objc2Method.types];
+
+                if (extendedMethodTypesCursor) {
+                    uint64_t extendedMethodTypes = [extendedMethodTypesCursor readPtr];
+                    types = [self.machOFile stringAtAddress:extendedMethodTypes];
+                }
+
+                CDOCMethod *method = [[CDOCMethod alloc] initWithName:name typeString:types address:objc2Method.imp];
+                [methods addObject:method];
+            }
         }
     }
     
@@ -443,27 +487,30 @@
     
     if (address != 0) {
         CDMachOFileDataCursor *cursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:address];
-        NSParameterAssert([cursor offset] != 0);
+        if ([cursor offset] == 0) return ivars;
         //NSLog(@"ivar list data offset: %lu", [cursor offset]);
         
         struct cd_objc2_list_header listHeader;
         
         listHeader.entsize = [cursor readInt32];
         listHeader.count = [cursor readInt32];
-        NSParameterAssert(listHeader.entsize == 3 * [self.machOFile ptrSize] + 2 * sizeof(uint32_t));
-        
+        if (listHeader.count == 0) return ivars;
+//        NSLog(@"[ivar] entsize=%u count=%u at address=0x%lx", listHeader.entsize, listHeader.count, address);
+
         for (uint32_t index = 0; index < listHeader.count; index++) {
             struct cd_objc2_ivar objc2Ivar;
-            
+
             objc2Ivar.offset    = [cursor readPtr];
             objc2Ivar.name      = [cursor readPtr];
             objc2Ivar.type      = [cursor readPtr];
             objc2Ivar.alignment = [cursor readInt32];
             objc2Ivar.size      = [cursor readInt32];
-            
+
             if (objc2Ivar.name != 0) {
                 NSString *name       = [self.machOFile stringAtAddress:objc2Ivar.name];
                 NSString *typeString = [self.machOFile stringAtAddress:objc2Ivar.type];
+//                NSLog(@"[ivar %u] offset_raw=0x%llx name_raw=0x%llx type_raw=0x%llx name=%@ type=%@",
+//                      index, (uint64_t)objc2Ivar.offset, (uint64_t)objc2Ivar.name, (uint64_t)objc2Ivar.type, name, typeString);
                 CDMachOFileDataCursor *offsetCursor = [[CDMachOFileDataCursor alloc] initWithFile:self.machOFile address:objc2Ivar.offset];
                 NSUInteger offset = (uint32_t)[offsetCursor readPtr]; // objc-runtime-new.h: "offset is 64-bit by accident" => restrict to 32-bit
                 
