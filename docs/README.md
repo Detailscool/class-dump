@@ -38,6 +38,30 @@ graph TD
 
 ---
 
+## 调试脚本
+
+调试过程中用到的 Python 脚本，保存在 `docs/scripts/` 目录：
+
+| 脚本 | 用途 |
+|------|------|
+| [01_parse_load_commands.py](scripts/01_parse_load_commands.py) | 解析 LC_DYLD_CHAINED_FIXUPS，输出每个 segment 的 pointer_format，判断用哪种解码方式 |
+| [02_decode_chained_fixup.py](scripts/02_decode_chained_fixup.py) | 验证 chained fixup pointer 解码逻辑，对比 36-bit 绝对地址 vs 32-bit offset 两种方式，验证 __PAGEZERO 过滤 |
+| [03_trace_class_ivar.py](scripts/03_trace_class_ivar.py) | 追踪第一个 ObjC 类的完整结构链（classlist → class_t → class_ro_t → ivar_list），验证 ivar name/type 指针解码是否正确 |
+
+**用法示例：**
+
+```bash
+# 查看 pulu 的 chained fixup pointer format
+python3 docs/scripts/01_parse_load_commands.py /path/to/aaa.app/aaa
+
+# 验证解码逻辑
+python3 docs/scripts/02_decode_chained_fixup.py /path/to/aaa.app/aaa
+
+# 追踪 ivar 解析链
+python3 docs/scripts/03_trace_class_ivar.py /path/to/aaa.app/aaa
+```
+
+---
 
 ## 编译方法
 
