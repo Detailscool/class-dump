@@ -33,6 +33,7 @@
 #import "CDLCMain.h"
 #import "CDLCDataInCode.h"
 #import "CDLCSourceVersion.h"
+#import "CDLCBuildVersion.h"
 
 @implementation CDLoadCommand
 {
@@ -93,7 +94,7 @@
         case LC_DATA_IN_CODE:          targetClass = [CDLCDataInCode class]; break;
         case LC_SOURCE_VERSION:        targetClass = [CDLCSourceVersion class]; break;
         case LC_DYLIB_CODE_SIGN_DRS:   targetClass = [CDLCLinkeditData class]; break; // Designated Requirements
-        case LC_BUILD_VERSION:         targetClass = [CDLCUnknown class]; break; // build version, no data needed
+        case LC_BUILD_VERSION:         targetClass = [CDLCBuildVersion class]; break;
         case LC_DYLD_EXPORTS_TRIE:     targetClass = [CDLCLinkeditData class]; break; // 0x80000033
         case LC_DYLD_CHAINED_FIXUPS:   targetClass = [CDLCLinkeditData class]; break; // 0x80000034
             

@@ -489,6 +489,7 @@ static NSString *CDTokenDescription(int token)
         || token == 'D'
         || token == 'B'
         || token == 'v'
+        || token == 'A'
         || token == '*'
         || token == '#'
         || token == ':'

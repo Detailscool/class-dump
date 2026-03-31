@@ -16,6 +16,7 @@
 #import "CDLCRunPath.h"
 #import "CDLCSegment.h"
 #import "CDLCSourceVersion.h"
+#import "CDLCBuildVersion.h"
 #import "CDLCVersionMinimum.h"
 #import "CDTypeController.h"
 
@@ -64,6 +65,13 @@
     
     if (machOFile.sourceVersion != nil)
         [self.resultString appendFormat:@"//                 Source version: %@\n", machOFile.sourceVersion.sourceVersionString];
+
+    if (machOFile.buildVersion != nil) {
+        [self.resultString appendFormat:@"//                  Build version: %@\n", machOFile.buildVersion.buildVersionString];
+        for (NSString *toolStr in machOFile.buildVersion.toolStrings) {
+            [self.resultString appendFormat:@"//                           Tool: %@\n", toolStr];
+        }
+    }
 
     if (machOFile.minVersionMacOSX != nil) {
         [self.resultString appendFormat:@"//       Minimum Mac OS X version: %@\n", machOFile.minVersionMacOSX.minimumVersionString];
